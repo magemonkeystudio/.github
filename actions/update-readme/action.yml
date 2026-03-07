@@ -1,0 +1,9 @@
+name: 'Update README Repository URL'
+description: 'Replaces the snapshot repository URL with the releases URL in README.md'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run update_readme.py
+      shell: bash
+      run: python ${{ github.action_path }}/update_readme.py

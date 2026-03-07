@@ -94,7 +94,11 @@ jobs:
       # Release only: bump to release version before deploying
       - name: Update version (pre-deploy)
         if: ${{ !inputs.is_dev }}
-        run: python ./.github/update_version.py false true
+        uses: magemonkeystudio/.github/actions/update-version@main
+        with:
+          is_dev: 'false'
+          prep: 'true'
+          artifact_filter: ${{ inputs.artifact_filter }}
 
       - name: Publish to Travja Repo
         env:
@@ -107,7 +111,7 @@ jobs:
       # Release only: update README with new version info
       - name: Update README
         if: ${{ !inputs.is_dev && inputs.update_readme }}
-        run: python ./.github/update_readme.py
+        uses: magemonkeystudio/.github/actions/update-readme@main
 
       # Dev: simple tag, no commit needed
       - name: Tag dev version
@@ -151,15 +155,23 @@ jobs:
       # Dev: bump to next snapshot
       - name: Update version (dev)
         if: ${{ inputs.is_dev }}
-        run: python ./.github/update_version.py true
+        uses: magemonkeystudio/.github/actions/update-version@main
+        with:
+          is_dev: 'true'
+          artifact_filter: ${{ inputs.artifact_filter }}
 
       # Release: two-stage version bump (base version, then dev snapshot)
       - name: Update version (release base)
         if: ${{ !inputs.is_dev }}
-        run: python ./.github/update_version.py
+        uses: magemonkeystudio/.github/actions/update-version@main
+        with:
+          artifact_filter: ${{ inputs.artifact_filter }}
       - name: Update version (release dev snapshot)
         if: ${{ !inputs.is_dev }}
-        run: python ./.github/update_version.py true
+        uses: magemonkeystudio/.github/actions/update-version@main
+        with:
+          is_dev: 'true'
+          artifact_filter: ${{ inputs.artifact_filter }}
 
       # Dev: stage everything except generated/temp files, commit, push with tags
       - name: Push to git (dev)

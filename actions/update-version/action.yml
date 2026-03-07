@@ -1,0 +1,28 @@
+name: 'Update POM Version'
+description: 'Bump the Maven project version. Handles both single-module and multi-module (codex-style) projects.'
+
+inputs:
+  is_dev:
+    description: '"true" for dev snapshot bump, "false" for release bump'
+    required: false
+    default: 'false'
+  prep:
+    description: '"true" to bump the R-number only (pre-release prep step)'
+    required: false
+    default: 'false'
+  artifact_filter:
+    description: >
+      Regex fragment used to anchor the version match to a specific <artifactId> line
+      (e.g. "codex" for multi-module projects).  Leave empty or ".*?" for the standard
+      4-space-indented root <version> tag.
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run update_version.py
+      shell: bash
+      env:
+        ARTIFACT_FILTER: ${{ inputs.artifact_filter }}
+      run: python ${{ github.action_path }}/update_version.py ${{ inputs.is_dev }} ${{ inputs.prep }}
