@@ -1,18 +1,30 @@
-name: Reusable Release Build
+name: Reusable Build
 
 on:
   workflow_call:
     inputs:
+      is_dev:
+        description: 'True for a dev build (dev branch), false for a release build (main branch)'
+        type: boolean
+        default: false
+      maven_args:
+        description: 'Extra arguments for the Maven deploy command (e.g. -f pom-dev.xml). Dev builds only.'
+        type: string
+        default: ''
       artifact_filter:
-        description: 'Regex fragment to filter artifact ID for multi-module builds'
+        description: 'Regex fragment to filter artifact ID for multi-module builds (e.g. codex)'
         type: string
         default: '.*?'
       build_spigot:
-        description: 'Whether to build Spigot jars via BuildTools before deploying'
+        description: 'Whether to build Spigot jars via BuildTools before deploying. Release builds only.'
+        type: boolean
+        default: false
+      update_javadocs:
+        description: 'Whether to update the editor branch javadocs after building. Dev builds only.'
         type: boolean
         default: false
       update_readme:
-        description: 'Whether to run update_readme.py after deploying'
+        description: 'Whether to run update_readme.py after deploying. Release builds only.'
         type: boolean
         default: true
     secrets:
@@ -51,8 +63,10 @@ jobs:
           settings-path: ${{ github.workspace }}
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
           gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      # Release only: build Spigot jars locally (e.g. codex needs old NMS versions)
       - name: Build Spigot dependencies
-        if: inputs.build_spigot
+        if: ${{ !inputs.is_dev && inputs.build_spigot }}
         run: |
           wget https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar
           $JAVA_HOME_11_X64/bin/java -jar BuildTools.jar --rev 1.16.5
@@ -67,27 +81,44 @@ jobs:
           java -jar BuildTools.jar --rev 1.21.4
       - uses: actions/checkout@v4
         name: Re-checkout repo after BuildTools
-        if: inputs.build_spigot
+        if: ${{ !inputs.is_dev && inputs.build_spigot }}
         with:
           token: ${{ secrets.ACTIONS_PAT }}
+
       - name: Create settings.xml
         uses: s4u/maven-settings-action@v3.0.0
         with:
           githubServer: false
           servers: '[{"id": "magemonkey-repo", "username": "${{ secrets.REPO_USERNAME }}", "password": "${{ secrets.DEPLOY_KEY }}"}]'
-      - name: Update version
+
+      # Release only: bump to release version before deploying
+      - name: Update version (pre-deploy)
+        if: ${{ !inputs.is_dev }}
         run: python ./.github/update_version.py false true
+
       - name: Publish to Travja Repo
         env:
           MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
-          mvn clean deploy -P gpg,publish -DcreateChecksum=true 2>&1 | tee log.txt
+          mvn clean deploy ${{ inputs.maven_args }} -P gpg,publish -DcreateChecksum=true 2>&1 | tee log.txt
           result_code=${PIPESTATUS[0]}
           exit $result_code
+
+      # Release only: update README with new version info
       - name: Update README
-        if: inputs.update_readme
+        if: ${{ !inputs.is_dev && inputs.update_readme }}
         run: python ./.github/update_readme.py
-      - name: Tag release version
+
+      # Dev: simple tag, no commit needed
+      - name: Tag dev version
+        if: ${{ inputs.is_dev }}
+        run: |
+          version=$(mvn org.apache.maven.plugins:maven-help-plugin:3.1.0:evaluate -Dexpression=project.version -q -DforceStdout)
+          git tag -a $version -m "Dev $version"
+
+      # Release: commit updated files, tag, push, then merge back to dev
+      - name: Tag and publish release version
+        if: ${{ !inputs.is_dev }}
         run: |
           git add .
           git commit -m "[ci skip] Update release version"
@@ -98,18 +129,59 @@ jobs:
           git fetch --unshallow --all
           git checkout dev
           git merge -X theirs --no-edit main
-      - name: Update version
-        run: python ./.github/update_version.py
-      - name: Update version
+
+      # Dev only: update editor branch javadocs (fabled)
+      - uses: actions/checkout@v4
+        name: Checkout editor branch
+        if: ${{ inputs.is_dev && inputs.update_javadocs }}
+        with:
+          ref: editor
+          path: editor
+          token: ${{ secrets.ACTIONS_PAT }}
+      - name: Update Javadocs
+        if: ${{ inputs.is_dev && inputs.update_javadocs }}
+        run: |
+          rm -rf editor/static/javadocs
+          cp -r gh-pages/apidocs/ editor/static/javadocs/
+          cd editor
+          git add .
+          git commit -m "Update javadocs"
+          git push
+
+      # Dev: bump to next snapshot
+      - name: Update version (dev)
+        if: ${{ inputs.is_dev }}
         run: python ./.github/update_version.py true
-      - name: Push to git
+
+      # Release: two-stage version bump (base version, then dev snapshot)
+      - name: Update version (release base)
+        if: ${{ !inputs.is_dev }}
+        run: python ./.github/update_version.py
+      - name: Update version (release dev snapshot)
+        if: ${{ !inputs.is_dev }}
+        run: python ./.github/update_version.py true
+
+      # Dev: stage everything except generated/temp files, commit, push with tags
+      - name: Push to git (dev)
+        if: ${{ inputs.is_dev }}
+        run: |
+          git add .
+          git reset settings.xml log.txt toolchains.xml
+          git commit -m "[ci skip] Update dev version"
+          git push
+          git push --tags
+
+      # Release: commit the version bump and push (already pushed tags above)
+      - name: Push to git (release)
+        if: ${{ !inputs.is_dev }}
         run: |
           git add .
           git commit -m "[ci skip] Update version for development"
           git push
+
       - name: Notify Discord
         uses: magemonkeystudio/.github/actions/notify-discord@main
         with:
           webhook_urls: ${{ secrets.WEBHOOK_URLS }}
-          is_dev: 'false'
+          is_dev: ${{ inputs.is_dev }}
           artifact_filter: ${{ inputs.artifact_filter }}
