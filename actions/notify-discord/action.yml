@@ -1,0 +1,38 @@
+name: 'Notify Discord'
+description: 'Sends a Discord webhook notification for a new build. Supports multiple webhook endpoints.'
+
+inputs:
+  webhook_urls:
+    description: 'Newline-separated list of Discord webhook URLs'
+    required: true
+  is_dev:
+    description: 'Whether this is a dev build'
+    required: false
+    default: 'false'
+  log_file:
+    description: 'Path to the Maven build log file'
+    required: false
+    default: 'log.txt'
+  artifact_filter:
+    description: 'Regex fragment to filter artifact ID (useful for multi-module builds). Default matches any artifact.'
+    required: false
+    default: '.*?'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+    - name: Install dependencies
+      shell: bash
+      run: pip install simplejson requests
+    - name: Send notifications
+      shell: bash
+      env:
+        WEBHOOK_URLS: ${{ inputs.webhook_urls }}
+        IS_DEV: ${{ inputs.is_dev }}
+        LOG_FILE: ${{ inputs.log_file }}
+        ARTIFACT_FILTER: ${{ inputs.artifact_filter }}
+      run: python ${{ github.action_path }}/notify_published.py
