@@ -1,0 +1,115 @@
+name: Reusable Release Build
+
+on:
+  workflow_call:
+    inputs:
+      artifact_filter:
+        description: 'Regex fragment to filter artifact ID for multi-module builds'
+        type: string
+        default: '.*?'
+      build_spigot:
+        description: 'Whether to build Spigot jars via BuildTools before deploying'
+        type: boolean
+        default: false
+      update_readme:
+        description: 'Whether to run update_readme.py after deploying'
+        type: boolean
+        default: true
+    secrets:
+      ACTIONS_PAT:
+        required: true
+      REPO_USERNAME:
+        required: true
+      DEPLOY_KEY:
+        required: true
+      GPG_PRIVATE_KEY:
+        required: true
+      GPG_PASSPHRASE:
+        required: true
+      WEBHOOK_URLS:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout repo
+        with:
+          token: ${{ secrets.ACTIONS_PAT }}
+      - name: Configure git
+        run: |
+          git config user.name "Build Monkey"
+          git config user.email "<>"
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: 21
+          server-id: ossrh
+          settings-path: ${{ github.workspace }}
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+      - name: Build Spigot dependencies
+        if: inputs.build_spigot
+        run: |
+          wget https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar
+          $JAVA_HOME_11_X64/bin/java -jar BuildTools.jar --rev 1.16.5
+          $JAVA_HOME_17_X64/bin/java -jar BuildTools.jar --rev 1.17.1
+          $JAVA_HOME_17_X64/bin/java -jar BuildTools.jar --rev 1.18.2
+          $JAVA_HOME_17_X64/bin/java -jar BuildTools.jar --rev 1.19.4
+          java -jar BuildTools.jar --rev 1.20.2
+          java -jar BuildTools.jar --rev 1.20.4
+          java -jar BuildTools.jar --rev 1.20.6
+          java -jar BuildTools.jar --rev 1.21.1
+          java -jar BuildTools.jar --rev 1.21.2
+          java -jar BuildTools.jar --rev 1.21.4
+      - uses: actions/checkout@v4
+        name: Re-checkout repo after BuildTools
+        if: inputs.build_spigot
+        with:
+          token: ${{ secrets.ACTIONS_PAT }}
+      - name: Create settings.xml
+        uses: s4u/maven-settings-action@v3.0.0
+        with:
+          githubServer: false
+          servers: '[{"id": "magemonkey-repo", "username": "${{ secrets.REPO_USERNAME }}", "password": "${{ secrets.DEPLOY_KEY }}"}]'
+      - name: Update version
+        run: python ./.github/update_version.py false true
+      - name: Publish to Travja Repo
+        env:
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          mvn clean deploy -P gpg,publish -DcreateChecksum=true 2>&1 | tee log.txt
+          result_code=${PIPESTATUS[0]}
+          exit $result_code
+      - name: Update README
+        if: inputs.update_readme
+        run: python ./.github/update_readme.py
+      - name: Tag release version
+        run: |
+          git add .
+          git commit -m "[ci skip] Update release version"
+          version=$(mvn org.apache.maven.plugins:maven-help-plugin:3.1.0:evaluate -Dexpression=project.version -q -DforceStdout)
+          git tag -a $version -m "Release $version"
+          git push
+          git push --tags
+          git fetch --unshallow --all
+          git checkout dev
+          git merge -X theirs --no-edit main
+      - name: Update version
+        run: python ./.github/update_version.py
+      - name: Update version
+        run: python ./.github/update_version.py true
+      - name: Push to git
+        run: |
+          git add .
+          git commit -m "[ci skip] Update version for development"
+          git push
+      - name: Notify Discord
+        uses: magemonkeystudio/.github/actions/notify-discord@main
+        with:
+          webhook_urls: ${{ secrets.WEBHOOK_URLS }}
+          is_dev: 'false'
+          artifact_filter: ${{ inputs.artifact_filter }}
