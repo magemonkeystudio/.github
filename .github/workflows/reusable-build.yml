@@ -104,7 +104,7 @@ jobs:
         run: |
           mkdir -p ~/.m2/repository/.remoteRepositoryFilters
           echo 'com.github' > ~/.m2/repository/.remoteRepositoryFilters/groupId-jitpack.io.txt
-          echo 'studio.magemonkey' > ~/.m2/repository/.remoteRepositoryFilters/groupId-magemonkey-snapshots.txt
+          printf 'studio.magemonkey\nfr.neatmonster\n' > ~/.m2/repository/.remoteRepositoryFilters/groupId-magemonkey-snapshots.txt
           echo 'studio.magemonkey' > ~/.m2/repository/.remoteRepositoryFilters/groupId-magemonkey-releases.txt
 
       - name: Publish to Travja Repo
