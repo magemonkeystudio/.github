@@ -100,6 +100,13 @@ jobs:
           prep: 'true'
           artifact_filter: ${{ inputs.artifact_filter }}
 
+      - name: Configure Maven repository filters
+        run: |
+          mkdir -p ~/.m2/repository/.remoteRepositoryFilters
+          echo 'com.github' > ~/.m2/repository/.remoteRepositoryFilters/groupId-jitpack.io.txt
+          echo 'studio.magemonkey' > ~/.m2/repository/.remoteRepositoryFilters/groupId-magemonkey-snapshots.txt
+          echo 'studio.magemonkey' > ~/.m2/repository/.remoteRepositoryFilters/groupId-magemonkey-releases.txt
+
       - name: Publish to Travja Repo
         env:
           MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
