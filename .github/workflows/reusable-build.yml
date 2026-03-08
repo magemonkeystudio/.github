@@ -103,7 +103,8 @@ jobs:
       - name: Configure Maven repository filters
         run: |
           mkdir -p ~/.m2/repository/.remoteRepositoryFilters
-          printf 'com.github.FrancoBM12\ncom.github.LoneDev6\ncom.github.MilkBowl\ncom.github.Pwing-Minecraft\ncom.github.Realizedd\ncom.github.TechFortress\ncom.github.Zrips\ncom.github.angeschossen\ncom.github.cryptomorin\ncom.github.nikosgram\ncom.github.retrooper\ncom.github.shynixn.structureblocklib\ncom.github.stefvanschie.inventoryframework\n' > ~/.m2/repository/.remoteRepositoryFilters/groupId-jitpack.io.txt
+          printf 'com.github.FrancoBM12\ncom.github.MilkBowl\ncom.github.Pwing-Minecraft\ncom.github.Realizedd\ncom.github.TechFortress\ncom.github.Zrips\ncom.github.angeschossen\ncom.github.cryptomorin\ncom.github.nikosgram\ncom.github.retrooper\ncom.github.shynixn.structureblocklib\ncom.github.stefvanschie.inventoryframework\n' > ~/.m2/repository/.remoteRepositoryFilters/groupId-jitpack.io.txt
+          echo 'dev.lone' > ~/.m2/repository/.remoteRepositoryFilters/groupId-matteodev.txt
           printf 'studio.magemonkey\nfr.neatmonster\n' > ~/.m2/repository/.remoteRepositoryFilters/groupId-magemonkey-snapshots.txt
           echo 'studio.magemonkey' > ~/.m2/repository/.remoteRepositoryFilters/groupId-magemonkey-releases.txt
 
