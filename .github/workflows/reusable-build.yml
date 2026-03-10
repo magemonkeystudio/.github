@@ -52,8 +52,8 @@ jobs:
           token: ${{ secrets.ACTIONS_PAT }}
       - name: Configure git
         run: |
-          git config user.name "Build Monkey"
-          git config user.email "<>"
+          git config --global user.name "Build Monkey"
+          git config --global user.email "<>"
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
