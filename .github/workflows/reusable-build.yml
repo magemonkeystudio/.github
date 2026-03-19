@@ -79,6 +79,10 @@ jobs:
           java -jar BuildTools.jar --rev 1.21.1
           java -jar BuildTools.jar --rev 1.21.2
           java -jar BuildTools.jar --rev 1.21.4
+          java -jar BuildTools.jar --rev 1.21.5
+          java -jar BuildTools.jar --rev 1.21.7
+          java -jar BuildTools.jar --rev 1.21.10
+          java -jar BuildTools.jar --rev 1.21.11
       - uses: actions/checkout@v4
         name: Re-checkout repo after BuildTools
         if: ${{ !inputs.is_dev && inputs.build_spigot }}
