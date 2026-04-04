@@ -1,4 +1,4 @@
-# Mage Monkey Studios (Formerly ProMCTeam)
+# VoidEdge (Formerly Mage Monkey Studios)
 
 [![Discord](https://dcbadge.limes.pink/api/server/mQrkW4htUA?style=flat)](https://discord.gg/mQrkW4htUA) 
 
