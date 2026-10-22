@@ -147,7 +147,10 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: 21
+          # 25 is for the 26.x Spigot builds (JAVA_HOME_25_X64); the last one listed, 21, is the default
+          java-version: |
+            25
+            21
           server-id: ossrh
           settings-path: ${{ github.workspace }}
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -172,6 +175,9 @@ jobs:
           java -jar BuildTools.jar --rev 1.21.7
           java -jar BuildTools.jar --rev 1.21.10
           java -jar BuildTools.jar --rev 1.21.11
+          # 26.x BuildTools needs Java 25
+          $JAVA_HOME_25_X64/bin/java -jar BuildTools.jar --rev 26.2
+          $JAVA_HOME_25_X64/bin/java -jar BuildTools.jar --rev 26.3
       - uses: actions/checkout@v4
         name: Re-checkout repo after BuildTools
         if: ${{ inputs.mode == 'release' && inputs.build_spigot }}
@@ -209,7 +215,12 @@ jobs:
           MAVEN_ARGS: ${{ inputs.maven_args }}
           REVISION: ${{ needs.plan.outputs.revision }}
           CHANGELIST: ${{ needs.plan.outputs.changelist }}
+          BUILD_SPIGOT: ${{ inputs.build_spigot }}
         run: |
+          # The 26.x Spigot jars are Java 25 bytecode, so modules compiled against them need a Java 25 javac
+          if [ "$BUILD_SPIGOT" = true ]; then
+            export JAVA_HOME="$JAVA_HOME_25_X64" PATH="$JAVA_HOME_25_X64/bin:$PATH"
+          fi
           mvn -B clean deploy $MAVEN_ARGS -P gpg,publish -DcreateChecksum=true -Daether.remoteRepositoryFilter.groupId=true \
             -Drevision="$REVISION" -Dchangelist="$CHANGELIST" 2>&1 | tee log.txt
           exit ${PIPESTATUS[0]}
