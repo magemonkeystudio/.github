@@ -1,0 +1,64 @@
+name: Reusable Dependabot Approve and Auto-Merge
+
+# Approves a Dependabot PR and enables auto-merge on it. Call it from a workflow triggered by
+#
+#   on:
+#     push:
+#       branches: [ 'dependabot/**' ]
+#
+# Only Dependabot pushes those branches, so unlike a pull_request_target trigger this never
+# shows up as a skipped check on other PRs. The caller has to exist on every branch Dependabot
+# targets, since a push runs the workflow file from the pushed branch.
+#
+# Runs triggered by Dependabot only get Dependabot secrets, so ACTIONS_PAT must also be added
+# under Settings → Secrets and variables → Dependabot (repository or organization).
+
+on:
+  workflow_call:
+    secrets:
+      ACTIONS_PAT:
+        required: false
+
+jobs:
+  dependabot:
+    runs-on: ubuntu-latest
+    # Skips pushes by people (e.g. a fix pushed onto a Dependabot PR) and branch deletions
+    if: ${{ github.actor == 'dependabot[bot]' && !github.event.deleted }}
+    concurrency:
+      group: dependabot-auto-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Approve and enable auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.ACTIONS_PAT }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::ACTIONS_PAT is not set as a Dependabot secret. Add it under Settings → Secrets and variables → Dependabot."
+            exit 1
+          fi
+
+          # Dependabot pushes the branch just before it opens the PR, so give it a moment
+          pr=''
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --author app/dependabot --state open \
+              --json url -q '.[0].url')
+            [ -n "$pr" ] && break
+            sleep 15
+          done
+          if [ -z "$pr" ]; then
+            echo "No open Dependabot PR for $BRANCH; nothing to do."
+            exit 0
+          fi
+
+          # Approve once per PR, so Dependabot's rebases don't send a new approval every time
+          me=$(gh api user -q .login)
+          approved=$(gh pr view "$pr" --json latestReviews \
+            -q "[.latestReviews[] | select(.author.login == \"$me\" and .state == \"APPROVED\")] | length")
+          if [ "$approved" = 0 ]; then
+            gh pr review --approve "$pr"
+          else
+            echo "$pr is already approved by $me."
+          fi
+
+          gh pr merge --auto --squash "$pr"
