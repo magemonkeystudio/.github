@@ -1,7 +1,8 @@
 name: Reusable Semver Label Check
 
-# Fails a PR until it carries exactly one of the labels major, minor or patch.
-# The semver build uses these labels to pick the next version.
+# Fails a PR until it carries exactly one of the labels build:major, build:minor or
+# build:patch. The semver build uses these labels to pick the next version. Plain
+# major/minor/patch labels, which Dependabot adds by itself, don't count.
 #
 # Call it from a workflow triggered by
 #   pull_request:
@@ -14,14 +15,14 @@ jobs:
   semver-label:
     runs-on: ubuntu-latest
     steps:
-      - name: Require one of major/minor/patch
+      - name: Require one of build:major/minor/patch
         env:
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         run: |
-          found=$(jq -r '.[] | ascii_downcase | select(. == "major" or . == "minor" or . == "patch")' <<< "$LABELS")
+          found=$(jq -r '.[] | ascii_downcase | select(. == "build:major" or . == "build:minor" or . == "build:patch")' <<< "$LABELS")
           count=$(grep -c . <<< "$found" || true)
           if [ "$count" -ne 1 ]; then
-            echo "::error::Add exactly one of the labels major, minor or patch (found: $(echo ${found:-none}))."
+            echo "::error::Add exactly one of the labels build:major, build:minor or build:patch (found: $(echo ${found:-none}))."
             exit 1
           fi
           echo "Semver label: $found"

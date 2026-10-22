@@ -1,7 +1,7 @@
 name: 'Next Version'
 description: >
-  Compute the next semantic version from the last release tag and the major/minor/patch
-  labels of the PRs merged since. Needs a full-history checkout (fetch-depth: 0).
+  Compute the next semantic version from the last release tag and the build:major,
+  build:minor and build:patch labels of the PRs merged since. Needs a full-history checkout (fetch-depth: 0).
 
 inputs:
   mode:

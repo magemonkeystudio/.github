@@ -3,8 +3,11 @@ Work out the next semantic version from git tags and PR labels.
 
 The last release is the X.Y.Z tag (legacy X.Y.Z-RN tags count too) nearest to HEAD
 in its history. Every PR merged since then must carry one of the labels
-major/minor/patch; the highest one decides the bump. Commits that did not come in
-through a PR count as a patch.
+build:major, build:minor or build:patch; the highest one decides the bump. Commits
+that did not come in through a PR count as a patch.
+
+The labels are prefixed because Dependabot adds plain major/minor/patch labels by
+itself, based on the dependency's version jump. Those are ignored here.
 
 Nothing is written back to the repository: the version only exists in the build
 (-Drevision/-Dchangelist) and, for releases, in the tag the workflow pushes.
@@ -20,6 +23,7 @@ import subprocess
 import sys
 
 BUMPS = ('patch', 'minor', 'major')  # ascending
+LABEL_PREFIX = 'build:'
 RELEASE_TAG = re.compile(r'^(\d+)\.(\d+)\.(\d+)(?:-R(\d+))?$')
 
 
@@ -48,7 +52,7 @@ def last_release():
 
 def pr_bump(pr):
     labels = {label['name'].lower() for label in pr.get('labels', [])}
-    found = [b for b in BUMPS if b in labels]
+    found = [b for b in BUMPS if LABEL_PREFIX + b in labels]
     return found[-1] if found else None
 
 
@@ -98,7 +102,7 @@ def main(mode, prs_path):
     for pr in prs:
         pr_level = pr_bump(pr)
         if pr_level is None:
-            print(f'::warning::PR #{pr["number"]} has no major/minor/patch label; counting it as a patch')
+            print(f'::warning::PR #{pr["number"]} has no build:major/minor/patch label; counting it as a patch')
         elif BUMPS.index(pr_level) > BUMPS.index(bump):
             bump = pr_level
         rows.append(f'| #{pr["number"]} | {pr_level or "patch (unlabeled)"} | {pr["title"]} |')

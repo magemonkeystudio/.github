@@ -1,7 +1,7 @@
 name: Reusable Semver Build
 
 # Publishes a dev snapshot (X.Y.Z-SNAPSHOT) or a release (X.Y.Z) without committing
-# anything. The version comes from the last release tag plus the major/minor/patch
+# anything. The version comes from the last release tag plus the build:major/minor/patch
 # labels of the PRs merged since (see actions/next-version), and is passed to Maven
 # as -Drevision/-Dchangelist, so the pom must use <version>${revision}${changelist}</version>.
 #
