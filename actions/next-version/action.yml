@@ -1,0 +1,58 @@
+name: 'Next Version'
+description: >
+  Compute the next semantic version from the last release tag and the major/minor/patch
+  labels of the PRs merged since. Needs a full-history checkout (fetch-depth: 0).
+
+inputs:
+  mode:
+    description: '"dev" for X.Y.Z-SNAPSHOT, "release" for X.Y.Z'
+    required: true
+  pr_base:
+    description: 'Base branch of the PRs to read labels from'
+    required: false
+    default: 'dev'
+  token:
+    description: 'Token used to list merged PRs'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  version:
+    description: 'Full version to build, e.g. 1.2.0-SNAPSHOT or 1.2.0'
+    value: ${{ steps.next.outputs.version }}
+  release_version:
+    description: 'The X.Y.Z the next release will get'
+    value: ${{ steps.next.outputs.release_version }}
+  revision:
+    description: 'Value for -Drevision'
+    value: ${{ steps.next.outputs.revision }}
+  changelist:
+    description: 'Value for -Dchangelist ("-SNAPSHOT" or empty)'
+    value: ${{ steps.next.outputs.changelist }}
+  previous_tag:
+    description: 'The last release tag, empty if there is none'
+    value: ${{ steps.next.outputs.previous_tag }}
+  bump:
+    description: 'major, minor or patch'
+    value: ${{ steps.next.outputs.bump }}
+  has_changes:
+    description: '"true" if there are commits since the last release'
+    value: ${{ steps.next.outputs.has_changes }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: List merged PRs
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        PR_BASE: ${{ inputs.pr_base }}
+      run: |
+        gh pr list --repo "$GITHUB_REPOSITORY" --base "$PR_BASE" --state merged --limit 1000 \
+          --json number,title,labels,mergeCommit > "$RUNNER_TEMP/merged-prs.json"
+    - name: Compute version
+      id: next
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+      run: python3 "$GITHUB_ACTION_PATH/next_version.py" "$MODE" "$RUNNER_TEMP/merged-prs.json"

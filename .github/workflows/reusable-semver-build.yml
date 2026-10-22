@@ -1,0 +1,270 @@
+name: Reusable Semver Build
+
+# Publishes a dev snapshot (X.Y.Z-SNAPSHOT) or a release (X.Y.Z) without committing
+# anything. The version comes from the last release tag plus the major/minor/patch
+# labels of the PRs merged since (see actions/next-version), and is passed to Maven
+# as -Drevision/-Dchangelist, so the pom must use <version>${revision}${changelist}</version>.
+#
+# Callers need:
+#   permissions:
+#     contents: write        # push the release tag, create the GitHub release
+#     pull-requests: read    # read PR labels
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: '"dev" or "release"'
+        type: string
+        required: true
+      branch:
+        description: 'Branch to build from (scheduled runs always start on the default branch)'
+        type: string
+        default: 'dev'
+      release_branch:
+        description: 'Release only: branch to fast-forward to each release (e.g. main). Empty to leave branches alone.'
+        type: string
+        default: ''
+      skip_unchanged_days:
+        description: 'Dev only: on scheduled runs, skip the build if nothing was committed in this many days'
+        type: number
+        default: 7
+      dry_run:
+        description: 'Only compute and print the version'
+        type: boolean
+        default: false
+      maven_args:
+        description: 'Extra arguments for the Maven deploy command (e.g. -f pom-dev.xml)'
+        type: string
+        default: ''
+      artifact_filter:
+        description: 'Regex fragment to filter artifact ID for the Discord notification (multi-module builds)'
+        type: string
+        default: '.*?'
+      build_spigot:
+        description: 'Release only: build Spigot jars via BuildTools before deploying'
+        type: boolean
+        default: false
+      update_javadocs:
+        description: 'Dev only: update the editor branch javadocs after building'
+        type: boolean
+        default: false
+      release_assets:
+        description: 'Release only: glob of jars to attach to the GitHub release (sources/javadoc jars are skipped)'
+        type: string
+        default: '../build/*.jar'
+    secrets:
+      ACTIONS_PAT:
+        description: 'Needed only to push to a protected release_branch or the editor branch'
+        required: false
+      REPO_USERNAME:
+        required: true
+      DEPLOY_KEY:
+        required: true
+      GPG_PRIVATE_KEY:
+        required: true
+      GPG_PASSPHRASE:
+        required: false
+      WEBHOOK_URLS:
+        required: false
+    outputs:
+      version:
+        description: 'The version that was (or would be) published'
+        value: ${{ jobs.plan.outputs.version }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      revision: ${{ steps.next.outputs.revision }}
+      changelist: ${{ steps.next.outputs.changelist }}
+      previous_tag: ${{ steps.next.outputs.previous_tag }}
+      sha: ${{ steps.gate.outputs.sha }}
+      publish: ${{ steps.gate.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      - name: Compute version
+        id: next
+        uses: magemonkeystudio/.github/actions/next-version@main
+        with:
+          mode: ${{ inputs.mode }}
+          pr_base: ${{ inputs.branch }}
+
+      - name: Decide whether to publish
+        id: gate
+        env:
+          MODE: ${{ inputs.mode }}
+          EVENT: ${{ github.event_name }}
+          DAYS: ${{ inputs.skip_unchanged_days }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          HAS_CHANGES: ${{ steps.next.outputs.has_changes }}
+          PREVIOUS_TAG: ${{ steps.next.outputs.previous_tag }}
+        run: |
+          publish=true reason=''
+          if [ "$MODE" = release ] && [ "$HAS_CHANGES" != true ]; then
+            publish=false reason="nothing was committed since $PREVIOUS_TAG"
+          elif [ "$MODE" = dev ] && [ "$EVENT" = schedule ] && [ -z "$(git log -1 --since="$DAYS days ago" --format=%H)" ]; then
+            publish=false reason="nothing was committed in the last $DAYS days"
+          elif [ "$DRY_RUN" = true ]; then
+            publish=false reason='this is a dry run'
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          if [ "$publish" = false ]; then
+            echo "Not publishing: $reason" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+  publish:
+    needs: plan
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    # Dev and release builds of a repo never run at the same time
+    concurrency:
+      group: semver-build-${{ github.repository }}
+      cancel-in-progress: false
+    env:
+      MODE: ${{ inputs.mode }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      SHA: ${{ needs.plan.outputs.sha }}
+      HAS_WEBHOOKS: ${{ secrets.WEBHOOK_URLS != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout repo
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          token: ${{ secrets.ACTIONS_PAT || github.token }}
+      - name: Configure git
+        run: |
+          git config --global user.name "Build Monkey"
+          git config --global user.email "<>"
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: 21
+          server-id: ossrh
+          settings-path: ${{ github.workspace }}
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      # Release only: build Spigot jars locally (e.g. codex needs old NMS versions)
+      - name: Build Spigot dependencies
+        if: ${{ inputs.mode == 'release' && inputs.build_spigot }}
+        run: |
+          wget https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar
+          $JAVA_HOME_11_X64/bin/java -jar BuildTools.jar --rev 1.16.5
+          $JAVA_HOME_17_X64/bin/java -jar BuildTools.jar --rev 1.17.1
+          $JAVA_HOME_17_X64/bin/java -jar BuildTools.jar --rev 1.18.2
+          $JAVA_HOME_17_X64/bin/java -jar BuildTools.jar --rev 1.19.4
+          java -jar BuildTools.jar --rev 1.20.2
+          java -jar BuildTools.jar --rev 1.20.4
+          java -jar BuildTools.jar --rev 1.20.6
+          java -jar BuildTools.jar --rev 1.21.1
+          java -jar BuildTools.jar --rev 1.21.2
+          java -jar BuildTools.jar --rev 1.21.4
+          java -jar BuildTools.jar --rev 1.21.5
+          java -jar BuildTools.jar --rev 1.21.7
+          java -jar BuildTools.jar --rev 1.21.10
+          java -jar BuildTools.jar --rev 1.21.11
+      - uses: actions/checkout@v4
+        name: Re-checkout repo after BuildTools
+        if: ${{ inputs.mode == 'release' && inputs.build_spigot }}
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          token: ${{ secrets.ACTIONS_PAT || github.token }}
+
+      - name: Create settings.xml
+        uses: s4u/maven-settings-action@v3.0.0
+        with:
+          githubServer: false
+          servers: '[{"id": "magemonkey-repo", "username": "${{ secrets.REPO_USERNAME }}", "password": "${{ secrets.DEPLOY_KEY }}"}]'
+
+      - name: Configure Maven repository filters
+        run: |
+          mkdir -p ~/.m2/repository/.remoteRepositoryFilters
+          printf 'com.github.FrancoBM12\ncom.github.MilkBowl\ncom.github.Pwing-Minecraft\ncom.github.Realizedd\ncom.github.TechFortress\ncom.github.Zrips\ncom.github.angeschossen\ncom.github.cryptomorin\ncom.github.nikosgram\ncom.github.retrooper\ncom.github.shynixn.structureblocklib\ncom.github.stefvanschie.inventoryframework\n' > ~/.m2/repository/.remoteRepositoryFilters/groupId-jitpack.io.txt
+          echo 'dev.lone' > ~/.m2/repository/.remoteRepositoryFilters/groupId-matteodev.txt
+          printf 'studio.magemonkey\nfr.neatmonster\n' > ~/.m2/repository/.remoteRepositoryFilters/groupId-magemonkey-snapshots.txt
+          echo 'studio.magemonkey' > ~/.m2/repository/.remoteRepositoryFilters/groupId-magemonkey-releases.txt
+
+      # Pushing the tag before deploying claims the version: if another run already
+      # released it, the push fails and nothing gets published twice.
+      - name: Tag release
+        id: tag
+        if: ${{ inputs.mode == 'release' }}
+        run: |
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "refs/tags/$VERSION"
+
+      - name: Publish to Travja Repo
+        id: deploy
+        env:
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          MAVEN_ARGS: ${{ inputs.maven_args }}
+          REVISION: ${{ needs.plan.outputs.revision }}
+          CHANGELIST: ${{ needs.plan.outputs.changelist }}
+        run: |
+          mvn -B clean deploy $MAVEN_ARGS -P gpg,publish -DcreateChecksum=true -Daether.remoteRepositoryFilter.groupId=true \
+            -Drevision="$REVISION" -Dchangelist="$CHANGELIST" 2>&1 | tee log.txt
+          exit ${PIPESTATUS[0]}
+
+      - name: Release the tag after a failed deploy
+        if: ${{ failure() && steps.tag.outcome == 'success' && steps.deploy.outcome == 'failure' }}
+        run: git push origin ":refs/tags/$VERSION"
+
+      - name: Create GitHub release
+        if: ${{ inputs.mode == 'release' }}
+        env:
+          GH_TOKEN: ${{ secrets.ACTIONS_PAT || github.token }}
+          PREVIOUS_TAG: ${{ needs.plan.outputs.previous_tag }}
+          RELEASE_ASSETS: ${{ inputs.release_assets }}
+        run: |
+          shopt -s nullglob
+          assets=()
+          for file in $RELEASE_ASSETS; do
+            case "$file" in
+              *-sources.jar|*-javadoc.jar|*/original-*) ;;
+              *) assets+=("$file") ;;
+            esac
+          done
+          gh release create "$VERSION" "${assets[@]}" --verify-tag --title "$VERSION" --generate-notes \
+            ${PREVIOUS_TAG:+--notes-start-tag "$PREVIOUS_TAG"}
+
+      # A plain (non-force) push, so it fails rather than overwrite anything if the branch has diverged
+      - name: Fast-forward ${{ inputs.release_branch }}
+        if: ${{ inputs.mode == 'release' && inputs.release_branch != '' }}
+        env:
+          RELEASE_BRANCH: ${{ inputs.release_branch }}
+        run: git push origin "$SHA:refs/heads/$RELEASE_BRANCH"
+
+      # Dev only: update editor branch javadocs (fabled)
+      - uses: actions/checkout@v4
+        name: Checkout editor branch
+        if: ${{ inputs.mode == 'dev' && inputs.update_javadocs }}
+        with:
+          ref: editor
+          path: editor
+          token: ${{ secrets.ACTIONS_PAT }}
+      - name: Update Javadocs
+        if: ${{ inputs.mode == 'dev' && inputs.update_javadocs }}
+        run: |
+          rm -rf editor/static/javadocs
+          cp -r gh-pages/apidocs/ editor/static/javadocs/
+          cd editor
+          git add .
+          git commit -m "Update javadocs"
+          git push
+
+      - name: Notify Discord
+        if: ${{ env.HAS_WEBHOOKS == 'true' }}
+        uses: magemonkeystudio/.github/actions/notify-discord@main
+        with:
+          webhook_urls: ${{ secrets.WEBHOOK_URLS }}
+          is_dev: ${{ inputs.mode == 'dev' }}
+          artifact_filter: ${{ inputs.artifact_filter }}
