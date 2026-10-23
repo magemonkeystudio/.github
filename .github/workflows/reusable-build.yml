@@ -27,6 +27,10 @@ on:
         description: 'Whether to run update_readme.py after deploying. Release builds only.'
         type: boolean
         default: true
+      java_version:
+        description: 'JDK to build with (e.g. 25 when a dependency ships Java 25 class files)'
+        type: string
+        default: '21'
     secrets:
       ACTIONS_PAT:
         required: true
@@ -58,7 +62,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: 21
+          java-version: ${{ inputs.java_version }}
           server-id: ossrh
           settings-path: ${{ github.workspace }}
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -73,16 +77,16 @@ jobs:
           $JAVA_HOME_17_X64/bin/java -jar BuildTools.jar --rev 1.17.1
           $JAVA_HOME_17_X64/bin/java -jar BuildTools.jar --rev 1.18.2
           $JAVA_HOME_17_X64/bin/java -jar BuildTools.jar --rev 1.19.4
-          java -jar BuildTools.jar --rev 1.20.2
-          java -jar BuildTools.jar --rev 1.20.4
-          java -jar BuildTools.jar --rev 1.20.6
-          java -jar BuildTools.jar --rev 1.21.1
-          java -jar BuildTools.jar --rev 1.21.2
-          java -jar BuildTools.jar --rev 1.21.4
-          java -jar BuildTools.jar --rev 1.21.5
-          java -jar BuildTools.jar --rev 1.21.7
-          java -jar BuildTools.jar --rev 1.21.10
-          java -jar BuildTools.jar --rev 1.21.11
+          $JAVA_HOME_21_X64/bin/java -jar BuildTools.jar --rev 1.20.2
+          $JAVA_HOME_21_X64/bin/java -jar BuildTools.jar --rev 1.20.4
+          $JAVA_HOME_21_X64/bin/java -jar BuildTools.jar --rev 1.20.6
+          $JAVA_HOME_21_X64/bin/java -jar BuildTools.jar --rev 1.21.1
+          $JAVA_HOME_21_X64/bin/java -jar BuildTools.jar --rev 1.21.2
+          $JAVA_HOME_21_X64/bin/java -jar BuildTools.jar --rev 1.21.4
+          $JAVA_HOME_21_X64/bin/java -jar BuildTools.jar --rev 1.21.5
+          $JAVA_HOME_21_X64/bin/java -jar BuildTools.jar --rev 1.21.7
+          $JAVA_HOME_21_X64/bin/java -jar BuildTools.jar --rev 1.21.10
+          $JAVA_HOME_21_X64/bin/java -jar BuildTools.jar --rev 1.21.11
       - uses: actions/checkout@v4
         name: Re-checkout repo after BuildTools
         if: ${{ !inputs.is_dev && inputs.build_spigot }}

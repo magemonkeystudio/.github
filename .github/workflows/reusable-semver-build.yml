@@ -49,6 +49,10 @@ on:
         description: 'Dev only: update the editor branch javadocs after building'
         type: boolean
         default: false
+      java_version:
+        description: 'JDK to build and deploy with (e.g. 25 when a dependency ships Java 25 class files). 21 and 25 are installed; others come from the runner image.'
+        type: string
+        default: '21'
       release_assets:
         description: 'Release only: glob of jars to attach to the GitHub release (sources/javadoc jars are skipped)'
         type: string
@@ -216,11 +220,19 @@ jobs:
           REVISION: ${{ needs.plan.outputs.revision }}
           CHANGELIST: ${{ needs.plan.outputs.changelist }}
           BUILD_SPIGOT: ${{ inputs.build_spigot }}
+          JAVA_VERSION: ${{ inputs.java_version }}
         run: |
-          # The 26.x Spigot jars are Java 25 bytecode, so modules compiled against them need a Java 25 javac
-          if [ "$BUILD_SPIGOT" = true ]; then
-            export JAVA_HOME="$JAVA_HOME_25_X64" PATH="$JAVA_HOME_25_X64/bin:$PATH"
+          # The 26.x Spigot jars are Java 25 bytecode, so modules compiled against them need at least a Java 25 javac
+          if [ "$BUILD_SPIGOT" = true ] && [ "$JAVA_VERSION" -lt 25 ]; then
+            JAVA_VERSION=25
           fi
+          jdk_var="JAVA_HOME_${JAVA_VERSION}_X64"
+          if [ -z "${!jdk_var:-}" ]; then
+            echo "::error::No JDK $JAVA_VERSION on the runner ($jdk_var is not set)"
+            exit 1
+          fi
+          export JAVA_HOME="${!jdk_var}" PATH="${!jdk_var}/bin:$PATH"
+          echo "Building with JDK $JAVA_VERSION ($JAVA_HOME)"
           mvn -B clean deploy $MAVEN_ARGS -P gpg,publish -DcreateChecksum=true -Daether.remoteRepositoryFilter.groupId=true \
             -Drevision="$REVISION" -Dchangelist="$CHANGELIST" 2>&1 | tee log.txt
           exit ${PIPESTATUS[0]}
