@@ -233,8 +233,24 @@ jobs:
           fi
           export JAVA_HOME="${!jdk_var}" PATH="${!jdk_var}/bin:$PATH"
           echo "Building with JDK $JAVA_VERSION ($JAVA_HOME)"
+
+          # Toolchains for modules that compile with a different JDK than Maven runs on
+          # (e.g. Codex's pre-26 NMS modules use 21 while the build runs on 25)
+          mkdir -p ~/.m2
+          {
+            echo '<toolchains>'
+            for v in 21 25; do
+              home_var="JAVA_HOME_${v}_X64"
+              [ -n "${!home_var:-}" ] && printf '  <toolchain><type>jdk</type><provides><version>%s</version></provides><configuration><jdkHome>%s</jdkHome></configuration></toolchain>\n' "$v" "${!home_var}"
+            done
+            echo '</toolchains>'
+          } > ~/.m2/toolchains.xml
+          cat ~/.m2/toolchains.xml
+
+          # deployAtEnd: upload only after every module has built, so a failure partway through a
+          # multi-module build can't leave a partial release in the repository
           mvn -B clean deploy $MAVEN_ARGS -P gpg,publish -DcreateChecksum=true -Daether.remoteRepositoryFilter.groupId=true \
-            -Drevision="$REVISION" -Dchangelist="$CHANGELIST" 2>&1 | tee log.txt
+            -DdeployAtEnd=true -Drevision="$REVISION" -Dchangelist="$CHANGELIST" 2>&1 | tee log.txt
           exit ${PIPESTATUS[0]}
 
       - name: Release the tag after a failed deploy
