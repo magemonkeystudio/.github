@@ -14,12 +14,35 @@ on:
 jobs:
   semver-label:
     runs-on: ubuntu-latest
+    # A newer event on the same PR (e.g. the label added right after it was opened)
+    # cancels this run instead of letting it fail
+    concurrency:
+      group: semver-label-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     steps:
       - name: Require one of build:major/minor/patch
         env:
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          ACTION: ${{ github.event.action }}
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          found=$(jq -r '.[] | ascii_downcase | select(. == "build:major" or . == "build:minor" or . == "build:patch")' <<< "$LABELS")
+          semver_labels() {
+            jq -r '.[] | ascii_downcase | select(. == "build:major" or . == "build:minor" or . == "build:patch")' <<< "$1"
+          }
+          found=$(semver_labels "$LABELS")
+
+          # The event only has the labels the PR had when it fired, and labels are often
+          # added a moment after a PR is opened (by hand, a bot or the API), so re-read
+          # the current ones for a little while before failing
+          if [ -z "$found" ] && [ "$ACTION" != labeled ] && [ "$ACTION" != unlabeled ]; then
+            for _ in 1 2 3 4 5 6; do
+              sleep 5
+              found=$(semver_labels "$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" --jq '[.[].name]')")
+              [ -n "$found" ] && break
+            done
+          fi
+
           count=$(grep -c . <<< "$found" || true)
           if [ "$count" -ne 1 ]; then
             echo "::error::Add exactly one of the labels build:major, build:minor or build:patch (found: $(echo ${found:-none}))."
