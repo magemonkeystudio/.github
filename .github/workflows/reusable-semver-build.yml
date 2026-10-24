@@ -281,7 +281,13 @@ jobs:
         if: ${{ inputs.mode == 'release' && inputs.release_branch != '' }}
         env:
           RELEASE_BRANCH: ${{ inputs.release_branch }}
-        run: git push origin "$SHA:refs/heads/$RELEASE_BRANCH"
+        run: |
+          # This job's checkout is shallow, and without the branch's history git can't tell
+          # the push is a fast-forward and rejects it as if the branch had moved ("fetch first")
+          if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+            git fetch --quiet --unshallow origin "+refs/heads/$RELEASE_BRANCH:refs/remotes/origin/$RELEASE_BRANCH"
+          fi
+          git push origin "$SHA:refs/heads/$RELEASE_BRANCH"
 
       # Dev only: update editor branch javadocs (fabled)
       - uses: actions/checkout@v4
