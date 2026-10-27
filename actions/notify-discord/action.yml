@@ -17,6 +17,18 @@ inputs:
     description: 'Regex fragment to filter artifact ID (useful for multi-module builds). Default matches any artifact.'
     required: false
     default: '.*?'
+  build_name:
+    description: 'Name of the build (e.g. 1.2.1-dev.3) to title the message with. Empty to take it from the uploaded jar.'
+    required: false
+    default: ''
+  commit:
+    description: 'Commit the build was made from, linked in the message'
+    required: false
+    default: ''
+  release_url:
+    description: 'Page to link the title to (e.g. the GitHub release). Empty to link the uploaded jar.'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -35,4 +47,7 @@ runs:
         IS_DEV: ${{ inputs.is_dev }}
         LOG_FILE: ${{ inputs.log_file }}
         ARTIFACT_FILTER: ${{ inputs.artifact_filter }}
+        BUILD_NAME: ${{ inputs.build_name }}
+        COMMIT: ${{ inputs.commit }}
+        RELEASE_URL: ${{ inputs.release_url }}
       run: python ${{ github.action_path }}/notify_published.py

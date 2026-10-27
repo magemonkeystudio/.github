@@ -9,8 +9,13 @@ that did not come in through a PR count as a patch.
 The labels are prefixed because Dependabot adds plain major/minor/patch labels by
 itself, based on the dependency's version jump. Those are ignored here.
 
+Dev builds are published to Maven as X.Y.Z-SNAPSHOT, so dependents can follow the
+latest one, but each also gets its own name, X.Y.Z-dev.N: N is one more than the
+highest X.Y.Z-dev.* tag, and starts over at 1 for every X.Y.Z. That name is what
+the plugin shows as its version and what the workflow tags the build with.
+
 Nothing is written back to the repository: the version only exists in the build
-(-Drevision/-Dchangelist) and, for releases, in the tag the workflow pushes.
+(-Drevision/-Dchangelist/-Ddisplay.version) and in the tag the workflow pushes.
 
 Usage: next_version.py <dev|release> <prs.json>
   prs.json is the output of
@@ -25,6 +30,7 @@ import sys
 BUMPS = ('patch', 'minor', 'major')  # ascending
 LABEL_PREFIX = 'build:'
 RELEASE_TAG = re.compile(r'^(\d+)\.(\d+)\.(\d+)(?:-R(\d+))?$')
+DEV_SUFFIX = '-dev.'
 
 
 def git(*args):
@@ -48,6 +54,16 @@ def last_release():
         if best is None or key > best[0]:
             best = (key, version, tag)
     return best and (best[1], best[2])
+
+
+def next_dev_tag(release_version):
+    """The tag for the next dev build of release_version, and the latest existing one."""
+    prefix = release_version + DEV_SUFFIX
+    numbers = [int(t[len(prefix):]) for t in git('tag', '--list', prefix + '*').split()
+               if t[len(prefix):].isdigit()]
+    if not numbers:
+        return prefix + '1', ''
+    return prefix + str(max(numbers) + 1), prefix + str(max(numbers))
 
 
 def pr_bump(pr):
@@ -114,7 +130,15 @@ def main(mode, prs_path):
                  f'refusing to reuse it. Delete or rename the stale tag.')
 
     version = release_version + ('-SNAPSHOT' if mode == 'dev' else '')
+    tag, previous_dev_tag, built = release_version, '', False
+    if mode == 'dev':
+        tag, previous_dev_tag = next_dev_tag(release_version)
+        built = bool(previous_dev_tag) and \
+            git('rev-parse', f'{previous_dev_tag}^{{commit}}').strip() == git('rev-parse', 'HEAD').strip()
     output(version=version,
+           tag=tag,
+           previous_dev_tag=previous_dev_tag,
+           already_built=str(built).lower(),
            release_version=release_version,
            revision=release_version,
            changelist='-SNAPSHOT' if mode == 'dev' else '',
@@ -122,7 +146,7 @@ def main(mode, prs_path):
            bump=bump,
            has_changes=str(bool(commits)).lower())
 
-    summary(f'### {version}\n\n'
+    summary(f'### {tag if mode == "dev" else version}\n\n'
             f'Last release: `{previous_tag or "none"}` · {len(commits)} commit(s) since · '
             f'bump: **{bump}**\n')
     if rows:

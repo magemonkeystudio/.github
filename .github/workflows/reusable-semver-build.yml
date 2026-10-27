@@ -5,6 +5,11 @@ name: Reusable Semver Build
 # labels of the PRs merged since (see actions/next-version), and is passed to Maven
 # as -Drevision/-Dchangelist, so the pom must use <version>${revision}${changelist}</version>.
 #
+# Every build also gets a name and a tag: X.Y.Z for a release, X.Y.Z-dev.N for the Nth
+# dev build towards X.Y.Z. Dev builds become GitHub pre-releases under that tag, and the
+# name is passed as -Ddisplay.version for plugin.yml to show, so users can tell exactly
+# which build they run and be pointed to another.
+#
 # Callers need:
 #   permissions:
 #     contents: write        # push the release tag, create the GitHub release
@@ -54,7 +59,7 @@ on:
         type: string
         default: '21'
       release_assets:
-        description: 'Release only: glob of jars to attach to the GitHub release (sources/javadoc jars are skipped)'
+        description: 'Glob of jars to attach to the GitHub release or pre-release (sources/javadoc jars are skipped)'
         type: string
         default: '../build/*.jar'
     secrets:
@@ -84,6 +89,8 @@ jobs:
       revision: ${{ steps.next.outputs.revision }}
       changelist: ${{ steps.next.outputs.changelist }}
       previous_tag: ${{ steps.next.outputs.previous_tag }}
+      tag: ${{ steps.next.outputs.tag }}
+      previous_dev_tag: ${{ steps.next.outputs.previous_dev_tag }}
       sha: ${{ steps.gate.outputs.sha }}
       publish: ${{ steps.gate.outputs.publish }}
     steps:
@@ -108,12 +115,16 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
           HAS_CHANGES: ${{ steps.next.outputs.has_changes }}
           PREVIOUS_TAG: ${{ steps.next.outputs.previous_tag }}
+          ALREADY_BUILT: ${{ steps.next.outputs.already_built }}
+          PREVIOUS_DEV_TAG: ${{ steps.next.outputs.previous_dev_tag }}
         run: |
           publish=true reason=''
           # A dev build with nothing since the last release would only republish that release
           # as the next version's snapshot, so both modes skip it
           if [ "$HAS_CHANGES" != true ]; then
             publish=false reason="nothing was committed since $PREVIOUS_TAG"
+          elif [ "$ALREADY_BUILT" = true ]; then
+            publish=false reason="this commit was already published as $PREVIOUS_DEV_TAG"
           elif [ "$MODE" = dev ] && [ "$EVENT" = schedule ] && [ -z "$(git log -1 --since="$DAYS days ago" --format=%H)" ]; then
             publish=false reason="nothing was committed in the last $DAYS days"
           elif [ "$DRY_RUN" = true ]; then
@@ -136,6 +147,7 @@ jobs:
     env:
       MODE: ${{ inputs.mode }}
       VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.plan.outputs.tag }}
       SHA: ${{ needs.plan.outputs.sha }}
       HAS_WEBHOOKS: ${{ secrets.WEBHOOK_URLS != '' }}
 
@@ -206,14 +218,14 @@ jobs:
           printf 'studio.magemonkey\nfr.neatmonster\n' > ~/.m2/repository/.remoteRepositoryFilters/groupId-magemonkey-snapshots.txt
           echo 'studio.magemonkey' > ~/.m2/repository/.remoteRepositoryFilters/groupId-magemonkey-releases.txt
 
-      # Pushing the tag before deploying claims the version: if another run already
-      # released it, the push fails and nothing gets published twice.
-      - name: Tag release
+      # Pushing the tag before deploying claims the name: if another run already
+      # published it, the push fails and nothing gets published twice.
+      - name: Tag ${{ needs.plan.outputs.tag }}
         id: tag
-        if: ${{ inputs.mode == 'release' }}
         run: |
-          git tag -a "$VERSION" -m "Release $VERSION"
-          git push origin "refs/tags/$VERSION"
+          if [ "$MODE" = release ]; then message="Release $TAG"; else message="Dev build $TAG ($VERSION)"; fi
+          git tag -a "$TAG" -m "$message"
+          git push origin "refs/tags/$TAG"
 
       - name: Publish to Travja Repo
         id: deploy
@@ -253,30 +265,46 @@ jobs:
           # deployAtEnd: upload only after every module has built, so a failure partway through a
           # multi-module build can't leave a partial release in the repository
           mvn -B clean deploy $MAVEN_ARGS -P gpg,publish -DcreateChecksum=true -Daether.remoteRepositoryFilter.groupId=true \
-            -DdeployAtEnd=true -Drevision="$REVISION" -Dchangelist="$CHANGELIST" 2>&1 | tee log.txt
+            -DdeployAtEnd=true -Drevision="$REVISION" -Dchangelist="$CHANGELIST" -Ddisplay.version="$TAG" 2>&1 | tee log.txt
           exit ${PIPESTATUS[0]}
 
       - name: Release the tag after a failed deploy
         if: ${{ failure() && steps.tag.outcome == 'success' && steps.deploy.outcome == 'failure' }}
-        run: git push origin ":refs/tags/$VERSION"
+        run: git push origin ":refs/tags/$TAG"
 
-      - name: Create GitHub release
-        if: ${{ inputs.mode == 'release' }}
+      - name: Create GitHub ${{ inputs.mode == 'release' && 'release' || 'pre-release' }}
         env:
           GH_TOKEN: ${{ secrets.ACTIONS_PAT || github.token }}
           PREVIOUS_TAG: ${{ needs.plan.outputs.previous_tag }}
+          PREVIOUS_DEV_TAG: ${{ needs.plan.outputs.previous_dev_tag }}
           RELEASE_ASSETS: ${{ inputs.release_assets }}
         run: |
           shopt -s nullglob
           assets=()
+          mkdir -p "$RUNNER_TEMP/assets"
           for file in $RELEASE_ASSETS; do
             case "$file" in
-              *-sources.jar|*-javadoc.jar|*/original-*) ;;
-              *) assets+=("$file") ;;
+              *-sources.jar|*-javadoc.jar|*/original-*) continue ;;
             esac
+            # Name a dev build's jar after the build (codex-1.2.1-dev.3.jar), not the snapshot
+            name=$(basename "$file")
+            if [ "$MODE" = dev ]; then
+              cp "$file" "$RUNNER_TEMP/assets/${name/$VERSION/$TAG}"
+              assets+=("$RUNNER_TEMP/assets/${name/$VERSION/$TAG}")
+            else
+              assets+=("$file")
+            fi
           done
-          gh release create "$VERSION" "${assets[@]}" --verify-tag --title "$VERSION" --generate-notes \
-            ${PREVIOUS_TAG:+--notes-start-tag "$PREVIOUS_TAG"}
+
+          if [ "$MODE" = release ]; then
+            gh release create "$TAG" "${assets[@]}" --verify-tag --title "$TAG" --generate-notes \
+              ${PREVIOUS_TAG:+--notes-start-tag "$PREVIOUS_TAG"}
+          else
+            # Notes cover what changed since the previous dev build (or the release, for the first)
+            start=${PREVIOUS_DEV_TAG:-$PREVIOUS_TAG}
+            gh release create "$TAG" "${assets[@]}" --verify-tag --prerelease --title "$TAG" --generate-notes \
+              ${start:+--notes-start-tag "$start"}
+          fi
 
       # A plain (non-force) push, so it fails rather than overwrite anything if the branch has diverged
       - name: Fast-forward ${{ inputs.release_branch }}
@@ -316,3 +344,6 @@ jobs:
           webhook_urls: ${{ secrets.WEBHOOK_URLS }}
           is_dev: ${{ inputs.mode == 'dev' }}
           artifact_filter: ${{ inputs.artifact_filter }}
+          build_name: ${{ needs.plan.outputs.tag }}
+          commit: ${{ needs.plan.outputs.sha }}
+          release_url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.plan.outputs.tag }}

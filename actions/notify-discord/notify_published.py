@@ -8,6 +8,10 @@ is_dev = os.environ.get('IS_DEV', 'false').lower() == 'true'
 log_file = os.environ.get('LOG_FILE', 'log.txt')
 artifact_filter = os.environ.get('ARTIFACT_FILTER', '.*?')
 webhook_urls = [u.strip() for u in os.environ.get('WEBHOOK_URLS', '').splitlines() if u.strip()]
+build_name = os.environ.get('BUILD_NAME', '')
+commit = os.environ.get('COMMIT', '')
+release_url = os.environ.get('RELEASE_URL', '')
+repository = os.environ.get('GITHUB_REPOSITORY', '')
 
 search_string = (
     r'Uploaded to (magemonkey-repo): (https:\/\/repo\.travja\.dev(:443)?\/.*?\/studio\/magemonkey\/('
@@ -28,7 +32,9 @@ def get_info():
 
 
 version, name, url = get_info()
-if is_dev:
+if build_name:
+    version = name + '-' + build_name
+elif is_dev:
     # Snapshot jars are named <artifact>-<version>-<yyyyMMdd.HHmmss>-<build>; show -SNAPSHOT instead
     version = re.sub(r'-\d{8}\.\d{6}-\d+$', '-SNAPSHOT', version)
 embed = {
@@ -42,9 +48,12 @@ embed = {
     },
     'title': version,
     'description': 'Click the link above to download the new build!',
-    'url': url,
+    'url': release_url or url,
     'color': 5341129
 }
+
+if commit and repository:
+    embed['description'] += f'\nCommit: [`{commit[:7]}`](https://github.com/{repository}/commit/{commit})'
 
 for webhook_url in webhook_urls:
     requests.post(webhook_url,

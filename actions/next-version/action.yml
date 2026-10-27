@@ -29,6 +29,15 @@ outputs:
   changelist:
     description: 'Value for -Dchangelist ("-SNAPSHOT" or empty)'
     value: ${{ steps.next.outputs.changelist }}
+  tag:
+    description: 'Name and tag of this build: X.Y.Z for a release, X.Y.Z-dev.N for a dev build'
+    value: ${{ steps.next.outputs.tag }}
+  previous_dev_tag:
+    description: 'Dev only: the latest X.Y.Z-dev.N tag of this version, empty if there is none'
+    value: ${{ steps.next.outputs.previous_dev_tag }}
+  already_built:
+    description: 'Dev only: "true" if HEAD is already the latest dev build of this version'
+    value: ${{ steps.next.outputs.already_built }}
   previous_tag:
     description: 'The last release tag, empty if there is none'
     value: ${{ steps.next.outputs.previous_tag }}
