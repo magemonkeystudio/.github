@@ -110,7 +110,9 @@ jobs:
           PREVIOUS_TAG: ${{ steps.next.outputs.previous_tag }}
         run: |
           publish=true reason=''
-          if [ "$MODE" = release ] && [ "$HAS_CHANGES" != true ]; then
+          # A dev build with nothing since the last release would only republish that release
+          # as the next version's snapshot, so both modes skip it
+          if [ "$HAS_CHANGES" != true ]; then
             publish=false reason="nothing was committed since $PREVIOUS_TAG"
           elif [ "$MODE" = dev ] && [ "$EVENT" = schedule ] && [ -z "$(git log -1 --since="$DAYS days ago" --format=%H)" ]; then
             publish=false reason="nothing was committed in the last $DAYS days"

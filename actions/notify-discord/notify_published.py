@@ -29,8 +29,8 @@ def get_info():
 
 version, name, url = get_info()
 if is_dev:
-    split = version.split('-')[0:-2]
-    version = '-'.join(split)
+    # Snapshot jars are named <artifact>-<version>-<yyyyMMdd.HHmmss>-<build>; show -SNAPSHOT instead
+    version = re.sub(r'-\d{8}\.\d{6}-\d+$', '-SNAPSHOT', version)
 embed = {
     'username': 'Dev Mage',
     'author': {
