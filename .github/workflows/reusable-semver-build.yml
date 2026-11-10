@@ -10,6 +10,9 @@ name: Reusable Semver Build
 # name is passed as -Ddisplay.version for plugin.yml to show, so users can tell exactly
 # which build they run and be pointed to another.
 #
+# Scheduled runs skip when only dependency bumps (Dependabot commits, PRs labelled
+# `dependencies`) came in since the last release; a run started by hand publishes them.
+#
 # Callers need:
 #   permissions:
 #     contents: write        # push the release tag, create the GitHub release
@@ -114,6 +117,7 @@ jobs:
           DAYS: ${{ inputs.skip_unchanged_days }}
           DRY_RUN: ${{ inputs.dry_run }}
           HAS_CHANGES: ${{ steps.next.outputs.has_changes }}
+          HAS_COMMITS: ${{ steps.next.outputs.has_commits }}
           PREVIOUS_TAG: ${{ steps.next.outputs.previous_tag }}
           ALREADY_BUILT: ${{ steps.next.outputs.already_built }}
           PREVIOUS_DEV_TAG: ${{ steps.next.outputs.previous_dev_tag }}
@@ -121,8 +125,12 @@ jobs:
           publish=true reason=''
           # A dev build with nothing since the last release would only republish that release
           # as the next version's snapshot, so both modes skip it
-          if [ "$HAS_CHANGES" != true ]; then
+          if [ "$HAS_COMMITS" != true ]; then
             publish=false reason="nothing was committed since $PREVIOUS_TAG"
+          # Dependency bumps alone don't make a release (or a dev build) on their own schedule;
+          # starting the workflow by hand still publishes them
+          elif [ "$HAS_CHANGES" != true ] && [ "$EVENT" = schedule ]; then
+            publish=false reason="only dependency bumps were committed since $PREVIOUS_TAG (start the workflow by hand to publish them anyway)"
           elif [ "$ALREADY_BUILT" = true ]; then
             publish=false reason="this commit was already published as $PREVIOUS_DEV_TAG"
           elif [ "$MODE" = dev ] && [ "$EVENT" = schedule ] && [ -z "$(git log -1 --since="$DAYS days ago" --format=%H)" ]; then

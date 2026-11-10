@@ -45,8 +45,11 @@ outputs:
     description: 'major, minor or patch'
     value: ${{ steps.next.outputs.bump }}
   has_changes:
-    description: '"true" if there are commits since the last release'
+    description: '"true" if something other than dependency bumps was committed since the last release'
     value: ${{ steps.next.outputs.has_changes }}
+  has_commits:
+    description: '"true" if anything at all was committed since the last release'
+    value: ${{ steps.next.outputs.has_commits }}
 
 runs:
   using: 'composite'

@@ -14,6 +14,11 @@ latest one, but each also gets its own name, X.Y.Z-dev.N: N is one more than the
 highest X.Y.Z-dev.* tag, and starts over at 1 for every X.Y.Z. That name is what
 the plugin shows as its version and what the workflow tags the build with.
 
+Dependency bumps alone aren't worth a release: PRs labelled `dependencies` (Dependabot adds
+it to its PRs; add it by hand to your own pure version-bump PRs) and commits authored by
+Dependabot still count towards the bump, but has_changes is only true when something else
+changed too. The workflow skips scheduled builds when it's false.
+
 Nothing is written back to the repository: the version only exists in the build
 (-Drevision/-Dchangelist/-Ddisplay.version) and in the tag the workflow pushes.
 
@@ -29,6 +34,8 @@ import sys
 
 BUMPS = ('patch', 'minor', 'major')  # ascending
 LABEL_PREFIX = 'build:'
+DEPENDENCY_LABEL = 'dependencies'
+DEPENDABOT_EMAIL = re.compile(r'^(\d+\+)?dependabot\[bot\]@users\.noreply\.github\.com$')
 RELEASE_TAG = re.compile(r'^(\d+)\.(\d+)\.(\d+)(?:-R(\d+))?$')
 DEV_SUFFIX = '-dev.'
 
@@ -72,6 +79,21 @@ def pr_bump(pr):
     return found[-1] if found else None
 
 
+def is_dependency_pr(pr):
+    return DEPENDENCY_LABEL in {label['name'].lower() for label in pr.get('labels', [])}
+
+
+def dependency_commits(commits, prs):
+    """The commits in commits that only bump dependencies: merges of dependency PRs and
+    commits Dependabot authored."""
+    found = {pr['mergeCommit']['oid'] for pr in prs if is_dependency_pr(pr)}
+    for line in git('log', '--format=%H %ae', *commits, '--no-walk').splitlines() if commits else []:
+        sha, email = line.split(' ', 1)
+        if DEPENDABOT_EMAIL.match(email):
+            found.add(sha)
+    return found & commits
+
+
 def bump_version(base, bump):
     major, minor, patch = base
     if bump == 'major':
@@ -113,6 +135,8 @@ def main(mode, prs_path):
         prs = [pr for pr in json.load(f) if (pr.get('mergeCommit') or {}).get('oid') in commits]
     prs.sort(key=lambda pr: pr['number'])
 
+    other_commits = commits - dependency_commits(commits, prs)
+
     bump = 'patch'
     rows = []
     for pr in prs:
@@ -121,7 +145,8 @@ def main(mode, prs_path):
             print(f'::warning::PR #{pr["number"]} has no build:major/minor/patch label; counting it as a patch')
         elif BUMPS.index(pr_level) > BUMPS.index(bump):
             bump = pr_level
-        rows.append(f'| #{pr["number"]} | {pr_level or "patch (unlabeled)"} | {pr["title"]} |')
+        note = ' (dependencies)' if is_dependency_pr(pr) else ''
+        rows.append(f'| #{pr["number"]} | {pr_level or "patch (unlabeled)"}{note} | {pr["title"]} |')
 
     release_version = '.'.join(map(str, bump_version(base, bump)))
     if subprocess.run(['git', 'rev-parse', '-q', '--verify', f'refs/tags/{release_version}'],
@@ -144,10 +169,12 @@ def main(mode, prs_path):
            changelist='-SNAPSHOT' if mode == 'dev' else '',
            previous_tag=previous_tag,
            bump=bump,
-           has_changes=str(bool(commits)).lower())
+           has_changes=str(bool(other_commits)).lower(),
+           has_commits=str(bool(commits)).lower())
 
     summary(f'### {tag if mode == "dev" else version}\n\n'
-            f'Last release: `{previous_tag or "none"}` · {len(commits)} commit(s) since · '
+            f'Last release: `{previous_tag or "none"}` · {len(commits)} commit(s) since, '
+            f'{len(commits) - len(other_commits)} of them dependency bumps · '
             f'bump: **{bump}**\n')
     if rows:
         summary('| PR | Label | Title |\n|---|---|---|\n' + '\n'.join(rows))
